@@ -1,0 +1,8 @@
+{
+  "name": "Medika",
+  "description": "A minimalist tool that effortlessly extracts and displays multiple-choice questions in format",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
