@@ -72,16 +72,23 @@ private fun formatExplanationHtml(
 
     cleanedHtml = cleanedHtml.replace("\r\n", "\n").replace("\r", "\n")
 
-    // Clean artifacts
+    // Clean artifacts and bot handles
     cleanedHtml = cleanedHtml
         .replace(Regex("<img[^>]*>", RegexOption.IGNORE_CASE), "")
-        .replace(Regex("@med(?:_)?a[cd](?:\\s*a[cd])?", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("(?i)@[a-zA-Z0-9_]*(?:bot|prep|neet|channel|med|academy)[a-zA-Z0-9_]*"), "")
+        .replace(Regex("(?m)^\\s*@[a-zA-Z0-9_]+\\s*$"), "")
+        .replace(Regex("(?i)\\s*@[a-zA-Z0-9_]+$"), "")
         .replace(Regex("\\bmed(?:_)?a[cd](?:\\s*a[cd])?\\b", RegexOption.IGNORE_CASE), "")
-        .replace(Regex("@medAc", RegexOption.IGNORE_CASE), "")
         .replace(Regex("••\\s*Explanation\\s*\\n*\\s*••\\s*:\\s*\\n*", RegexOption.IGNORE_CASE), "")
         .replace(Regex("••\\s*Option\\s*\\n*\\s*••\\s*([A-E]\\.)", RegexOption.IGNORE_CASE), "•• Option $1")
         .replace(Regex("•\\s*Explanation\\s*\\n*\\s*•\\s*:\\s*\\n*", RegexOption.IGNORE_CASE), "")
         .replace(Regex("•\\s*Option\\s*\\n*\\s*•\\s*([A-E]\\.)", RegexOption.IGNORE_CASE), "• Option $1")
+
+    // Convert markdown bold and italic formatting to HTML tags for consistent bold rendering
+    cleanedHtml = cleanedHtml
+        .replace(Regex("\\*\\*(.+?)\\*\\*"), "<b>$1</b>")
+        .replace(Regex("__(.+?)__"), "<b>$1</b>")
+        .replace(Regex("(?<![\\w*])\\*([^*\\n]+?)\\*(?![\\w*])"), "<i>$1</i>")
 
     // Remove excessive newlines that might cause gaps
     cleanedHtml = cleanedHtml.replace(Regex("\\n{3,}"), "\n\n")
@@ -181,16 +188,23 @@ private fun formatExplanationMarkdown(
     cleaned = cleaned.replace(Regex("(?i)<li>"), "- ")
     cleaned = cleaned.replace(Regex("(?i)</li>"), "\n")
 
-    // Clean artifacts
+    // Clean artifacts and bot handles
     cleaned = cleaned
         .replace(Regex("<img[^>]*>", RegexOption.IGNORE_CASE), "")
-        .replace(Regex("@med(?:_)?a[cd](?:\\s*a[cd])?", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("(?i)@[a-zA-Z0-9_]*(?:bot|prep|neet|channel|med|academy)[a-zA-Z0-9_]*"), "")
+        .replace(Regex("(?m)^\\s*@[a-zA-Z0-9_]+\\s*$"), "")
+        .replace(Regex("(?i)\\s*@[a-zA-Z0-9_]+$"), "")
         .replace(Regex("\\bmed(?:_)?a[cd](?:\\s*a[cd])?\\b", RegexOption.IGNORE_CASE), "")
-        .replace(Regex("@medAc", RegexOption.IGNORE_CASE), "")
         .replace(Regex("••\\s*Explanation\\s*\\n*\\s*••\\s*:\\s*\\n*", RegexOption.IGNORE_CASE), "")
         .replace(Regex("••\\s*Option\\s*\\n*\\s*••\\s*([A-E]\\.)", RegexOption.IGNORE_CASE), "•• Option $1")
         .replace(Regex("•\\s*Explanation\\s*\\n*\\s*•\\s*:\\s*\\n*", RegexOption.IGNORE_CASE), "")
         .replace(Regex("•\\s*Option\\s*\\n*\\s*•\\s*([A-E]\\.)", RegexOption.IGNORE_CASE), "• Option $1")
+
+    // Convert markdown bold and italic formatting to HTML tags for consistent bold rendering
+    cleaned = cleaned
+        .replace(Regex("\\*\\*(.+?)\\*\\*"), "<b>$1</b>")
+        .replace(Regex("__(.+?)__"), "<b>$1</b>")
+        .replace(Regex("(?<![\\w*])\\*([^*\\n]+?)\\*(?![\\w*])"), "<i>$1</i>")
 
     // Cap excessive newlines to exactly 2 newlines (1 empty line)
     cleaned = cleaned.replace(Regex("\\n{3,}"), "\n\n")

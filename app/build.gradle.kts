@@ -13,7 +13,7 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "mediva.com"
+    applicationId = "com.aistudio.medivamcq.kbzqvw"
     minSdk = 24
     targetSdk = 35
     versionCode = 1

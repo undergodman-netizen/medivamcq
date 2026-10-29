@@ -251,6 +251,33 @@ class McqRepository(private val context: Context, private val db: AppDatabase) {
     }
 
     suspend fun saveCanonicalCollection(collection: com.example.data.CanonicalCollection) {
+        saveCanonicalCollectionWithProgress(collection) {}
+    }
+
+    suspend fun saveCanonicalCollectionWithProgress(
+        collection: com.example.data.CanonicalCollection,
+        onProgress: (Float) -> Unit
+    ) {
+        // ponytail: Ultra-fast bulk database import. Instead of 20,000+ individual SQL statements,
+        // we pre-map question IDs and perform batch chunked inserts for entities and cross-references.
+        val existingQuestionMap = mcqDao.getAllQuestionIdTexts().associate { it.question to it.id }.toMutableMap()
+
+        val allSets = collection.sections.flatMap { it.sets } + collection.unsectionedSets
+        val allUniqueFields = allSets.flatMap { it.questions }.distinctBy { it.question }
+        val newQuestionsToInsert = allUniqueFields.filter { !existingQuestionMap.containsKey(it.question) }
+
+        if (newQuestionsToInsert.isNotEmpty()) {
+            val chunks = newQuestionsToInsert.chunked(500)
+            chunks.forEachIndexed { idx, chunk ->
+                mcqDao.insertAll(chunk.map { it.toEntity() })
+                val ratio = ((idx + 1).toFloat() / chunks.size.toFloat()).coerceIn(0f, 0.7f)
+                onProgress(ratio)
+            }
+            // Update map with newly assigned question IDs
+            mcqDao.getAllQuestionIdTexts().forEach { existingQuestionMap[it.question] = it.id }
+        }
+        onProgress(0.75f)
+
         db.withTransaction {
             val colEntity = com.example.local.CollectionEntity(
                 id = collection.id,
@@ -259,28 +286,95 @@ class McqRepository(private val context: Context, private val db: AppDatabase) {
             )
             mcqDao.insertCollection(colEntity)
 
-            collection.sections.forEach { sec ->
-                val secEntity = com.example.local.SectionEntity(
+            val sectionEntities = collection.sections.map { sec ->
+                com.example.local.SectionEntity(
                     id = sec.id,
                     collectionId = collection.id,
                     name = sec.name,
                     sectionType = sec.sectionType,
                     displayOrder = sec.displayOrder
                 )
-                mcqDao.insertSections(listOf(secEntity))
+            }
+            if (sectionEntities.isNotEmpty()) {
+                mcqDao.insertSections(sectionEntities)
+            }
 
+            val setEntities = mutableListOf<com.example.local.McqSetEntity>()
+            val crossRefs = mutableListOf<com.example.local.SetQuestionCrossRef>()
+
+            collection.sections.forEach { sec ->
                 sec.sets.forEach { set ->
-                    saveCanonicalSetInternal(collection.id, sec.id, set)
+                    setEntities.add(
+                        com.example.local.McqSetEntity(
+                            id = set.id,
+                            collectionId = collection.id,
+                            sectionId = sec.id,
+                            sourceSetId = set.sourceSetId,
+                            title = set.title,
+                            setType = set.setType,
+                            subject = set.subject,
+                            topic = set.topic,
+                            questionCount = set.questions.size,
+                            durationMinutes = set.durationMinutes,
+                            totalMarks = set.totalMarks,
+                            displayOrder = set.displayOrder
+                        )
+                    )
+                    mcqDao.deleteCrossRefsForSet(set.id)
+                    set.questions.forEachIndexed { order, qField ->
+                        val qId = existingQuestionMap[qField.question] ?: 0
+                        if (qId > 0) {
+                            crossRefs.add(com.example.local.SetQuestionCrossRef(setId = set.id, questionId = qId, displayOrder = order))
+                        }
+                    }
                 }
             }
 
             collection.unsectionedSets.forEach { set ->
-                saveCanonicalSetInternal(collection.id, null, set)
+                setEntities.add(
+                    com.example.local.McqSetEntity(
+                        id = set.id,
+                        collectionId = collection.id,
+                        sectionId = null,
+                        sourceSetId = set.sourceSetId,
+                        title = set.title,
+                        setType = set.setType,
+                        subject = set.subject,
+                        topic = set.topic,
+                        questionCount = set.questions.size,
+                        durationMinutes = set.durationMinutes,
+                        totalMarks = set.totalMarks,
+                        displayOrder = set.displayOrder
+                    )
+                )
+                mcqDao.deleteCrossRefsForSet(set.id)
+                set.questions.forEachIndexed { order, qField ->
+                    val qId = existingQuestionMap[qField.question] ?: 0
+                    if (qId > 0) {
+                        crossRefs.add(com.example.local.SetQuestionCrossRef(setId = set.id, questionId = qId, displayOrder = order))
+                    }
+                }
+            }
+
+            if (setEntities.isNotEmpty()) {
+                mcqDao.insertSets(setEntities)
+            }
+
+            if (crossRefs.isNotEmpty()) {
+                crossRefs.chunked(1000).forEach { refChunk ->
+                    mcqDao.insertCrossRefs(refChunk)
+                }
             }
         }
+        onProgress(1f)
     }
 
-    private suspend fun saveCanonicalSetInternal(collectionId: String, sectionId: String?, set: com.example.data.CanonicalSet) {
+    private suspend fun saveCanonicalSetInternal(
+        collectionId: String,
+        sectionId: String?,
+        set: com.example.data.CanonicalSet,
+        questionCache: MutableMap<String, Int> = mutableMapOf()
+    ) {
         val setEntity = com.example.local.McqSetEntity(
             id = set.id,
             collectionId = collectionId,
@@ -303,11 +397,20 @@ class McqRepository(private val context: Context, private val db: AppDatabase) {
         val crossRefs = mutableListOf<com.example.local.SetQuestionCrossRef>()
         set.questions.forEachIndexed { order, qField ->
             val entity = qField.toEntity()
-            val existing = mcqDao.findQuestionByText(qField.question)
-            val qId = if (existing != null) {
-                existing.id
+            val cachedId = questionCache[qField.question]
+            val qId = if (cachedId != null && cachedId > 0) {
+                cachedId
             } else {
-                mcqDao.insertQuestionSingle(entity).toInt()
+                val existing = mcqDao.findQuestionByText(qField.question)
+                val id = if (existing != null) {
+                    existing.id
+                } else {
+                    mcqDao.insertQuestionSingle(entity).toInt()
+                }
+                if (id > 0) {
+                    questionCache[qField.question] = id
+                }
+                id
             }
             if (qId > 0) {
                 crossRefs.add(com.example.local.SetQuestionCrossRef(setId = set.id, questionId = qId, displayOrder = order))

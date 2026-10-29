@@ -581,6 +581,42 @@ class McqViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun loadCustomZipFromUri(context: Context, uri: Uri) {
+        _state.update {
+            it.copy(
+                uiState = McqUiState.Loading,
+                importProgress = 0f,
+                importDiagnostics = null
+            )
+        }
+        viewModelScope.launch {
+            try {
+                val totalImported = syncRepository.loadZipFromUri(
+                    context = context,
+                    uri = uri,
+                    fileRepository = fileRepository,
+                    onProgress = { p -> _state.update { it.copy(importProgress = p) } },
+                    onError = { e -> _state.update { it.copy(importDiagnostics = e) } }
+                )
+                _state.update {
+                    it.copy(
+                        importProgress = null,
+                        uiState = if (totalImported == 0)
+                            McqUiState.Error("No valid questions found in ZIP archive.")
+                        else it.uiState
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        uiState = McqUiState.Error("ZIP import failed: ${e.localizedMessage}"),
+                        importProgress = null
+                    )
+                }
+            }
+        }
+    }
+
     fun loadPastedCustomJson(displayName: String, json: String) {
         val safeName = displayName.trim().ifBlank { "Custom Set" }
             .replace(Regex("[^A-Za-z0-9 _-]"), "_").take(60)

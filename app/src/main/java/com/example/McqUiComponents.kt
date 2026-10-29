@@ -157,7 +157,7 @@ fun McqDashboard(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        if (summary.isNotEmpty()) {
+        // Always show action items
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth().widthIn(max = 600.dp),
@@ -256,13 +256,14 @@ fun McqDashboard(
                     }
                 }
             }
-        } else {
+
+        if (summary.isEmpty()) {
             item {
                 com.example.ui.components.EmptyState(
                     icon = Icons.Default.CloudUpload,
                     title = "No Questions Found",
-                    subtitle = "Go to Profile > Database to upload your question bank JSON files.",
-                    modifier = Modifier.fillMaxWidth().padding(top = 48.dp)
+                    subtitle = "Go to Profile > Database to upload your question bank JSON files or tap Custom to manage sets.",
+                    modifier = Modifier.fillMaxWidth().padding(top = 24.dp)
                 )
             }
         }
@@ -1063,7 +1064,7 @@ fun McqTopicList(
                                     color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "${stats.total} MCQs / ${stats.finished} over",
+                                    text = "${stats.total} MCQs • ${stats.finished} completed",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f) else if (stats.finished > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontWeight = if (stats.finished > 0) FontWeight.Medium else FontWeight.Normal,
@@ -1175,25 +1176,20 @@ fun McqFileTopicList(
     ) {
         item {
             Column(modifier = Modifier.padding(bottom = 12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
-                    IconButton(onClick = onBack, modifier = Modifier.padding(end = 8.dp).size(32.dp)) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.primary)
-                    }
-                    Column {
-                        Text(
-                            text = "Files / ${formatSourceDisplayName(sourceName)}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "Browse Topics in File",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    }
+                Column(modifier = Modifier.padding(bottom = 12.dp)) {
+                    Text(
+                        text = "Files / ${formatSourceDisplayName(sourceName)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Browse Topics in File",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                 }
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -1350,7 +1346,7 @@ fun McqFileTopicList(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "${item.totalCount} MCQs / ${item.finishedCount} over",
+                                text = "${item.totalCount} MCQs • ${item.finishedCount} completed",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (item.finishedCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontWeight = if (item.finishedCount > 0) FontWeight.Medium else FontWeight.Normal,
@@ -1662,7 +1658,7 @@ fun McqListMode(
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                         Text(
-                            text = "$totalCount MCQs / $answeredCount over",
+                            text = "$totalCount MCQs • $answeredCount completed",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary

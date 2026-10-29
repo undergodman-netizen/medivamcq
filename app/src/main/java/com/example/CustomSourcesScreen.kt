@@ -38,6 +38,7 @@ fun CustomSourcesScreen(
     onOpenSet: (String) -> Unit,
     onBack: () -> Unit,
     showTopBar: Boolean = false,
+    onNavigateToSession: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -67,48 +68,66 @@ fun CustomSourcesScreen(
         }
     }
 
+    val zipPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.loadCustomZipFromUri(context, uri)
+            showImportSheet = false
+        }
+    }
+
     val currentTitle = when {
         selectedSection != null -> selectedSection!!.name
         selectedCollection != null -> selectedCollection!!.name
         else -> "Custom Sets Library"
     }
 
+    BackHandler(enabled = selectedCollection != null || selectedSection != null) {
+        when {
+            selectedSection != null -> selectedSection = null
+            selectedCollection != null -> selectedCollection = null
+        }
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = currentTitle,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (selectedCollection != null) {
+            if (showTopBar) {
+                TopAppBar(
+                    title = {
+                        Column {
                             Text(
-                                text = if (selectedSection != null) "${selectedCollection!!.name} • Section" else "Collection Overview",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = currentTitle,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
+                            if (selectedCollection != null) {
+                                Text(
+                                    text = if (selectedSection != null) "${selectedCollection!!.name} • Section" else "Collection Overview",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = {
-                        when {
-                            selectedSection != null -> selectedSection = null
-                            selectedCollection != null -> selectedCollection = null
-                            else -> onBack()
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            when {
+                                selectedSection != null -> selectedSection = null
+                                selectedCollection != null -> selectedCollection = null
+                                else -> onBack()
+                            }
+                        }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
-                    }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
-            )
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+                )
+            }
         },
         floatingActionButton = {
             FloatingActionButton(
@@ -133,7 +152,78 @@ fun CustomSourcesScreen(
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            if (appState.importDiagnostics != null) {
+            if (!showTopBar && selectedCollection != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                ) {
+                    IconButton(
+                        onClick = {
+                            if (selectedSection != null) selectedSection = null
+                            else selectedCollection = null
+                        },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = if (selectedSection != null) "${selectedCollection!!.name} • Section" else "Collection Overview",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = currentTitle,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+            if (appState.importProgress != null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Extracting & Importing Question Bank...",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "${((appState.importProgress ?: 0f) * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = { appState.importProgress ?: 0f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                    )
+                }
+            }
+
+            if (!appState.importDiagnostics.isNullOrEmpty()) {
                 WedikaCard(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -192,7 +282,7 @@ fun CustomSourcesScreen(
                         onSelectSection = { selectedSection = it },
                         onStartSet = { setItem ->
                             viewModel.startSetSession(setItem.id, setItem.title, setItem.setType, setItem.durationMinutes) {
-                                onOpenSet(setItem.id)
+                                onNavigateToSession()
                             }
                         },
                         onDeleteSet = { setId -> itemToDelete = "set" to setId }
@@ -205,7 +295,7 @@ fun CustomSourcesScreen(
                         section = selectedSection!!,
                         onStartSet = { setItem ->
                             viewModel.startSetSession(setItem.id, setItem.title, setItem.setType, setItem.durationMinutes) {
-                                onOpenSet(setItem.id)
+                                onNavigateToSession()
                             }
                         },
                         onDeleteSet = { setId -> itemToDelete = "set" to setId }
@@ -256,6 +346,7 @@ fun CustomSourcesScreen(
         ImportOptionsBottomSheet(
             context = context,
             filePickerLauncher = filePickerLauncher,
+            zipPickerLauncher = zipPickerLauncher,
             onDismiss = { showImportSheet = false }
         )
     }
@@ -284,6 +375,7 @@ private fun CollectionsLibraryView(
     } else {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             if (collections.isNotEmpty()) {
@@ -342,11 +434,18 @@ private fun CollectionsLibraryView(
                                     )
                                 }
                             }
-                            IconButton(onClick = { onDeleteCollection(col.id) }) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { onDeleteCollection(col.id) }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Delete Collection",
+                                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                                    )
+                                }
                                 Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "Delete Collection",
-                                    tint = MaterialTheme.colorScheme.error
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = "Open Collection",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -392,11 +491,18 @@ private fun CollectionsLibraryView(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            IconButton(onClick = { if (src.isNotBlank()) onDeleteLegacySource(src) }) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { if (src.isNotBlank()) onDeleteLegacySource(src) }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Delete",
+                                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                                    )
+                                }
                                 Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "Delete",
-                                    tint = MaterialTheme.colorScheme.error
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = "Open",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -415,11 +521,12 @@ private fun CollectionView(
     onStartSet: (McqSetItem) -> Unit,
     onDeleteSet: (String) -> Unit
 ) {
-    val sections by viewModel.getSectionsForCollectionFlow(collection.id).collectAsStateWithLifecycle()
-    val unsectionedSets by viewModel.getUnsectionedSetsForCollectionFlow(collection.id).collectAsStateWithLifecycle()
+    val sections by remember(collection.id) { viewModel.getSectionsForCollectionFlow(collection.id) }.collectAsStateWithLifecycle()
+    val unsectionedSets by remember(collection.id) { viewModel.getUnsectionedSetsForCollectionFlow(collection.id) }.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         if (sections.isNotEmpty()) {
@@ -443,7 +550,10 @@ private fun CollectionView(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Icon(
                                 imageVector = if (sec.sectionType == "test_category") Icons.Default.Quiz else Icons.Default.Folder,
                                 contentDescription = null,
@@ -494,7 +604,7 @@ private fun SectionSetsView(
     onStartSet: (McqSetItem) -> Unit,
     onDeleteSet: (String) -> Unit
 ) {
-    val sets by viewModel.getSetsForSectionFlow(section.id).collectAsStateWithLifecycle()
+    val sets by remember(section.id) { viewModel.getSetsForSectionFlow(section.id) }.collectAsStateWithLifecycle()
 
     if (sets.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -503,6 +613,7 @@ private fun SectionSetsView(
     } else {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(sets, key = { it.id }) { setItem ->
@@ -531,48 +642,33 @@ private fun SetCardItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = setItem.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isTest) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer
-                    ) {
-                        Text(
-                            text = if (isTest) "TIMED TEST" else "PRACTICE",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isTest) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
-                    }
-                }
+                Text(
+                    text = setItem.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        text = "${setItem.questionCount} questions",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                val subtitle = buildString {
+                    append("${setItem.questionCount} questions")
                     if (setItem.durationMinutes != null && setItem.durationMinutes > 0) {
-                        Text(
-                            text = "${setItem.durationMinutes} mins",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        append(" • ${setItem.durationMinutes} mins")
+                    }
+                    if (isTest) {
+                        append(" • Timed Test")
                     }
                 }
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -580,15 +676,14 @@ private fun SetCardItem(
                     Icon(
                         imageVector = Icons.Default.Delete,
                         contentDescription = "Delete Set",
-                        tint = MaterialTheme.colorScheme.error
+                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
                     )
                 }
-                Button(
-                    onClick = { onStartSet(setItem) },
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Text(if (isTest) "Start Test" else "Practice")
-                }
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = "Open Set",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -597,9 +692,9 @@ private fun SetCardItem(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ImportOptionsBottomSheet(
-
     context: Context,
     filePickerLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>,
+    zipPickerLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>,
     onDismiss: () -> Unit
 ) {
     AppBottomSheet(
@@ -640,7 +735,43 @@ private fun ImportOptionsBottomSheet(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Supports Core BTR, nested collections, and flat arrays",
+                            text = "Supports single/multiple JSONs, nested collections, and flat arrays",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            WedikaCard(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    zipPickerLauncher.launch(
+                        arrayOf("*/*")
+                    )
+                }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FolderZip,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            text = "Import ZIP Question Bank (.zip)",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Auto-extracts nested subjects, topics, tests & question banks",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

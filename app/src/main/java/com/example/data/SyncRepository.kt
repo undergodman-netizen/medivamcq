@@ -246,6 +246,52 @@ class SyncRepository(private val mcqRepository: McqRepository) {
         return@withContext totalQuestions
     }
 
+    suspend fun loadZipFromUri(
+        context: Context,
+        uri: Uri,
+        fileRepository: FileRepository,
+        onProgress: (Float) -> Unit,
+        onError: (List<String>) -> Unit
+    ): Int = withContext(Dispatchers.IO) {
+        val errors = ArrayList<String>()
+        val fileName = fileRepository.getFileName(uri) ?: "imported_bank.zip"
+        var totalImportedQuestions = 0
+
+        try {
+            val stream = context.contentResolver.openInputStream(uri)
+            if (stream != null) {
+                onProgress(0.1f)
+                val canonicalCol = java.util.zip.ZipInputStream(stream).use { zipStream ->
+                    com.example.data.McqImporter.parseZipStream(
+                        zipStream = zipStream,
+                        collectionNameHint = fileName,
+                        errorCollector = errors,
+                        onProgress = { p, _ -> onProgress(0.1f + p * 0.4f) }
+                    )
+                }
+
+                onProgress(0.5f)
+                mcqRepository.saveCanonicalCollectionWithProgress(canonicalCol) { progressRatio ->
+                    onProgress(0.5f + progressRatio * 0.5f)
+                }
+                onProgress(1.0f)
+
+                totalImportedQuestions = canonicalCol.unsectionedSets.sumOf { it.questions.size } +
+                        canonicalCol.sections.sumOf { sec -> sec.sets.sumOf { s -> s.questions.size } }
+            } else {
+                errors.add("Unable to open input stream for selected ZIP file.")
+            }
+        } catch (e: Exception) {
+            errors.add("Failed to process ZIP archive: ${e.localizedMessage}")
+        }
+
+        if (errors.isNotEmpty()) {
+            onError(errors)
+        }
+
+        return@withContext totalImportedQuestions
+    }
+
 
 
 

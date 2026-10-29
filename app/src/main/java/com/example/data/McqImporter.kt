@@ -261,11 +261,17 @@ object McqImporter {
         defaultSubject: String? = null,
         sectionId: String? = null
     ): CanonicalSet {
-        val sourceSetId = obj.optString("id", obj.optString("set_id", obj.optString("code", null)))
+        val sourceSetId = if (obj.has("id")) obj.optString("id") else if (obj.has("set_id")) obj.optString("set_id") else if (obj.has("code")) obj.optString("code") else null
         val title = obj.optString("title", obj.optString("set_name", obj.optString("name", "Set ${order + 1}")))
         val setType = obj.optString("set_type", obj.optString("type", defaultSetType)).uppercase()
-        val subject = obj.optString("subject", defaultSubject ?: "General")
-        val topic = obj.optString("topic", "General")
+        val pathArr = obj.optJSONArray("path")
+        val inferredSubject = if (pathArr != null && pathArr.length() >= 2) {
+            pathArr.optString(1)
+        } else if (pathArr != null && pathArr.length() > 0) {
+            pathArr.optString(pathArr.length() - 1)
+        } else null
+        val subject = obj.optString("subject", defaultSubject ?: inferredSubject ?: "General")
+        val topic = obj.optString("topic", title)
         val duration = if (obj.has("duration_minutes")) obj.optInt("duration_minutes") else if (obj.has("time_limit_mins")) obj.optInt("time_limit_mins") else null
         val marks = if (obj.has("total_marks")) obj.optInt("total_marks") else null
 
@@ -311,8 +317,18 @@ object McqImporter {
         val topicText = optStringAlias(obj, "topic", "subtopic", "unit") ?: defaultTopic ?: "General"
         val explanationText = optStringAlias(obj, "explanation", "exp_html", "solution", "explain", "rationale")
         val aiExplanationText = optStringAlias(obj, "ai_explanation", "aiExplanation")
-        val imagesText = optStringAlias(obj, "images", "image", "question_images")
-        val audioText = optStringAlias(obj, "audio", "sound")
+        val imagesText = if (obj.has("question_images") && obj.opt("question_images") is JSONArray) {
+            val arr = obj.getJSONArray("question_images")
+            (0 until arr.length()).mapNotNull { arr.optString(it, null) }.filter { it.isNotBlank() }.joinToString(",")
+        } else {
+            optStringAlias(obj, "images", "image", "question_images")
+        }
+        val audioText = if (obj.has("audio") && obj.opt("audio") is JSONArray) {
+            val arr = obj.getJSONArray("audio")
+            (0 until arr.length()).mapNotNull { arr.optString(it, null) }.filter { it.isNotBlank() }.joinToString(",")
+        } else {
+            optStringAlias(obj, "audio", "sound")
+        }
         val sourceUrlText = optStringAlias(obj, "source_url", "source", "url") ?: sourceName ?: "custom://import"
 
         // Process Options and Correct Answer
@@ -501,6 +517,192 @@ object McqImporter {
             totalQuestions = totalQs,
             setSummaries = summaries,
             warnings = warnings
+        )
+    }
+
+    /**
+     * ponytail: Stream-based ZIP extraction that automatically extracts all nested JSONs,
+     * reads manifest metadata when available, formats categorized sections (qBank subjects & tests),
+     * and constructs a unified CanonicalCollection.
+     */
+    fun parseZipStream(
+        zipStream: java.util.zip.ZipInputStream,
+        collectionNameHint: String,
+        errorCollector: MutableList<String>?,
+        onProgress: ((Float, String) -> Unit)? = null
+    ): CanonicalCollection {
+        var datasetName: String? = null
+        var providerName: String? = null
+        val sectionSetsMap = linkedMapOf<String, MutableList<CanonicalSet>>()
+        val sectionTypeMap = mutableMapOf<String, String>()
+        val unsectionedSets = mutableListOf<CanonicalSet>()
+        val standaloneCollections = mutableListOf<CanonicalCollection>()
+
+        val defaultColName = collectionNameHint.removePrefix("custom://")
+            .substringBeforeLast('.')
+            .replace(Regex("[_\\-]"), " ")
+            .trim()
+            .takeIf { it.isNotBlank() } ?: "Imported Question Bank"
+
+        var entryIndex = 0
+        var entry = zipStream.nextEntry
+        val buffer = java.io.ByteArrayOutputStream()
+        val tempBuf = ByteArray(8192)
+
+        while (entry != null) {
+            val entryName = entry.name
+            if (!entry.isDirectory && entryName.endsWith(".json", ignoreCase = true)) {
+                val simpleName = entryName.substringAfterLast('/')
+                val isMeta = simpleName.equals("index.json", ignoreCase = true) ||
+                        simpleName.contains("schema", ignoreCase = true) ||
+                        simpleName.contains("validation-report", ignoreCase = true)
+
+                buffer.reset()
+                var readBytes: Int
+                while (zipStream.read(tempBuf).also { readBytes = it } > 0) {
+                    buffer.write(tempBuf, 0, readBytes)
+                }
+                val content = buffer.toString("UTF-8").trim()
+
+                if (simpleName.equals("manifest.json", ignoreCase = true)) {
+                    try {
+                        val mObj = JSONObject(content)
+                        datasetName = if (mObj.has("dataset_name")) mObj.optString("dataset_name") else if (mObj.has("title")) mObj.optString("title") else null
+                        providerName = if (mObj.has("source_file")) mObj.optString("source_file") else if (mObj.has("provider")) mObj.optString("provider") else null
+                    } catch (e: Exception) {
+                        // ignore manifest json parsing error
+                    }
+                } else if (!isMeta && content.isNotEmpty()) {
+                    try {
+                        if (content.startsWith("{")) {
+                            val obj = JSONObject(content)
+                            if (obj.has("questions") || obj.has("fields") || obj.has("results")) {
+                                val pathArr = obj.optJSONArray("path")
+                                var sectionName: String? = null
+                                var sectionType = "subject"
+
+                                if (pathArr != null && pathArr.length() > 0) {
+                                    val firstSeg = pathArr.optString(0)
+                                    if (firstSeg.equals("qbank", ignoreCase = true) && pathArr.length() >= 2) {
+                                        sectionName = "${pathArr.optString(1)} (Qbank)"
+                                        sectionType = "subject"
+                                    } else if (firstSeg.equals("tests", ignoreCase = true)) {
+                                        sectionName = pathArr.optString(pathArr.length() - 1)
+                                            .replace('_', ' ').replace('-', ' ').split(' ')
+                                            .filter { it.isNotBlank() }
+                                            .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+                                        sectionType = "test_category"
+                                    } else if (pathArr.length() >= 2) {
+                                        sectionName = pathArr.optString(1)
+                                    }
+                                }
+
+                                if (sectionName == null) {
+                                    val parts = entryName.split('/')
+                                    if (parts.size >= 3 && parts[0].equals("qbank", ignoreCase = true)) {
+                                        sectionName = parts[1].replace('_', ' ').replace('-', ' ').split(' ')
+                                            .filter { it.isNotBlank() }
+                                            .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } } + " (Qbank)"
+                                        sectionType = "subject"
+                                    } else if (parts.size >= 3 && parts[0].equals("tests", ignoreCase = true)) {
+                                        sectionName = parts[1].replace('_', ' ').replace('-', ' ').split(' ')
+                                            .filter { it.isNotBlank() }
+                                            .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+                                        sectionType = "test_category"
+                                    } else if (parts.size >= 2) {
+                                        sectionName = parts[parts.size - 2].replace('_', ' ').replace('-', ' ').split(' ')
+                                            .filter { it.isNotBlank() }
+                                            .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+                                    }
+                                }
+
+                                val colId = "col_" + (datasetName ?: defaultColName).hashCode().let { kotlin.math.abs(it) }
+                                val isTestType = entryName.contains("/tests/", ignoreCase = true) ||
+                                        obj.optString("type", "").contains("test", ignoreCase = true)
+                                val parsedSet = parseSingleSetObject(
+                                    obj = obj,
+                                    colId = colId,
+                                    order = entryIndex++,
+                                    sourceName = "custom://$entryName",
+                                    errorCollector = errorCollector,
+                                    defaultSetType = if (isTestType) "TEST" else "PRACTICE",
+                                    defaultSubject = sectionName
+                                )
+
+                                if (parsedSet.questions.isNotEmpty()) {
+                                    if (sectionName != null) {
+                                        sectionSetsMap.getOrPut(sectionName) { mutableListOf() }.add(parsedSet)
+                                        sectionTypeMap[sectionName] = sectionType
+                                    } else {
+                                        unsectionedSets.add(parsedSet)
+                                    }
+                                }
+                            } else if (obj.has("qbank") || obj.has("subjects") || obj.has("sections")) {
+                                val parsedCol = parseJsonObjectInput(obj, "col_${entryIndex++}", defaultColName, "custom://$entryName", errorCollector)
+                                standaloneCollections.add(parsedCol)
+                            }
+                        } else if (content.startsWith("[")) {
+                            val col = parseJsonArrayInput(JSONArray(content), "col_${entryIndex++}", simpleName.substringBeforeLast('.'), "custom://$entryName", errorCollector)
+                            standaloneCollections.add(col)
+                        }
+                    } catch (e: Exception) {
+                        errorCollector?.add("Error parsing entry $entryName: ${e.localizedMessage}")
+                    }
+                }
+            }
+            zipStream.closeEntry()
+            entry = zipStream.nextEntry
+        }
+
+        val finalName = datasetName ?: defaultColName
+        val finalColId = "col_" + finalName.hashCode().let { kotlin.math.abs(it) }
+
+        if (sectionSetsMap.isEmpty() && unsectionedSets.isEmpty() && standaloneCollections.isNotEmpty()) {
+            if (standaloneCollections.size == 1) {
+                val sc = standaloneCollections.first()
+                return sc.copy(id = finalColId, name = datasetName ?: sc.name)
+            }
+            val mergedSections = mutableListOf<CanonicalSection>()
+            var secOrder = 0
+            standaloneCollections.forEach { sc ->
+                if (sc.sections.isNotEmpty()) {
+                    mergedSections.addAll(sc.sections.map { it.copy(displayOrder = secOrder++) })
+                } else if (sc.unsectionedSets.isNotEmpty()) {
+                    mergedSections.add(
+                        CanonicalSection(
+                            id = "${finalColId}_sec_${secOrder++}",
+                            name = sc.name,
+                            sets = sc.unsectionedSets
+                        )
+                    )
+                }
+            }
+            return CanonicalCollection(
+                id = finalColId,
+                name = finalName,
+                sourceProvider = providerName ?: "Zip Archive",
+                sections = mergedSections
+            )
+        }
+
+        var secOrder = 0
+        val sections = sectionSetsMap.map { (secName, setsList) ->
+            val secId = "${finalColId}_sec_${secName.hashCode().let { kotlin.math.abs(it) }}"
+            CanonicalSection(
+                id = secId,
+                name = secName,
+                sectionType = sectionTypeMap[secName] ?: "subject",
+                displayOrder = secOrder++,
+                sets = setsList.mapIndexed { idx, set -> set.copy(displayOrder = idx) }
+            )
+        }
+
+        return CanonicalCollection(
+            id = finalColId,
+            name = finalName,
+            sourceProvider = providerName ?: "Zip Archive",
+            sections = sections,
+            unsectionedSets = unsectionedSets
         )
     }
 }

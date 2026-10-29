@@ -135,8 +135,16 @@ data class McqLightweightEntity(
     val sourceUrl: String?
 )
 
+data class QuestionIdText(
+    val id: Int,
+    val question: String
+)
+
 @Dao
 interface McqDao {
+    @Query("SELECT id, question FROM mcq_questions")
+    suspend fun getAllQuestionIdTexts(): List<QuestionIdText>
+
     @Query("SELECT * FROM mcq_questions ORDER BY id DESC")
     fun getAllQuestions(): Flow<List<McqEntity>>
 

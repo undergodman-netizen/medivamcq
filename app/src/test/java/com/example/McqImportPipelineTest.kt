@@ -150,4 +150,82 @@ class McqImportPipelineTest {
         assertEquals(1, preview.totalQuestions)
         assertEquals(1, preview.setsCount)
     }
+
+    @Test
+    fun testZipStreamParsingHierarchy() {
+        val baos = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(baos).use { zos ->
+            zos.putNextEntry(java.util.zip.ZipEntry("CORE-BTR-JSON/manifest.json"))
+            zos.write("""{
+                "schema_version": "1.0.0",
+                "dataset_name": "Core BTR Test Bank",
+                "source_file": "Test Source"
+            }""".toByteArray(Charsets.UTF_8))
+            zos.closeEntry()
+
+            zos.putNextEntry(java.util.zip.ZipEntry("CORE-BTR-JSON/qbank/anatomy/01-neuroanatomy.json"))
+            zos.write("""{
+                "id": "01_neuroanatomy",
+                "title": "Neuroanatomy",
+                "type": "qbank_topic",
+                "path": ["qBank", "Anatomy"],
+                "duration_minutes": 71,
+                "questions": [
+                    {
+                        "id": "Q-1",
+                        "text": "Charcot artery supplies which limb of internal capsule?",
+                        "options": [
+                            {"label": "A", "text": "Posterior limb", "correct": true},
+                            {"label": "B", "text": "Anterior limb", "correct": false}
+                        ],
+                        "correct_answer": "Posterior limb",
+                        "explanation": "Supplies posterior limb."
+                    }
+                ]
+            }""".toByteArray(Charsets.UTF_8))
+            zos.closeEntry()
+
+            zos.putNextEntry(java.util.zip.ZipEntry("CORE-BTR-JSON/tests/grand-test/gt-1.json"))
+            zos.write("""{
+                "id": "gt_1",
+                "title": "Grand Test 1",
+                "type": "test",
+                "path": ["tests", "downloaded_tests", "grand_test"],
+                "duration_minutes": 180,
+                "questions": [
+                    {
+                        "id": "Q-2",
+                        "text": "Most common site of ectopic pregnancy?",
+                        "options": ["Ampulla", "Isthmus", "Fimbria"],
+                        "correct_answer": "Ampulla",
+                        "explanation": "Ampulla is the most common site."
+                    }
+                ]
+            }""".toByteArray(Charsets.UTF_8))
+            zos.closeEntry()
+        }
+
+        val errors = mutableListOf<String>()
+        val zipInputStream = java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(baos.toByteArray()))
+        val canonicalCol = McqImporter.parseZipStream(zipInputStream, "CoreBTR.zip", errors)
+
+        assertTrue("Should have no errors", errors.isEmpty())
+        assertEquals("Core BTR Test Bank", canonicalCol.name)
+        assertEquals(2, canonicalCol.sections.size)
+
+        val qbankSec = canonicalCol.sections.find { it.name.contains("Anatomy") }
+        assertNotNull(qbankSec)
+        assertEquals("subject", qbankSec!!.sectionType)
+        assertEquals(1, qbankSec.sets.size)
+        assertEquals("Neuroanatomy", qbankSec.sets[0].title)
+        assertEquals("PRACTICE", qbankSec.sets[0].setType)
+        assertEquals(1, qbankSec.sets[0].questions.size)
+        assertEquals("Posterior limb", qbankSec.sets[0].questions[0].correct_answer)
+
+        val testSec = canonicalCol.sections.find { it.name.contains("Grand Test") }
+        assertNotNull(testSec)
+        assertEquals("test_category", testSec!!.sectionType)
+        assertEquals("TEST", testSec.sets[0].setType)
+        assertEquals(1, testSec.sets[0].questions.size)
+    }
 }

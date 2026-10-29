@@ -515,10 +515,11 @@ fun McqViewerApp(
             composable<Screen.CustomList> {
                 val appStateNow by viewModel.state.collectAsStateWithLifecycle()
                 CustomSourcesScreen(
-                    viewModel     = viewModel,
-                    appState      = appStateNow,
-                    onBack        = { navController.popBackStack() },
-                    onOpenSet     = { src -> navController.navigate(Screen.Source(src)) }
+                    viewModel           = viewModel,
+                    appState            = appStateNow,
+                    onBack              = { navController.popBackStack() },
+                    onOpenSet           = { src -> navController.navigate(Screen.Source(src)) },
+                    onNavigateToSession = { navController.navigate(Screen.Session()) }
                 )
             }
         }
